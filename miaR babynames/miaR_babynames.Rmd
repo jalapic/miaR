@@ -1,0 +1,104 @@
+---
+title: "miaR_babynames"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The first step is to load necessary packages and the data
+
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(gridExtra)
+
+load("../data/babynames.rda")
+head(babynames)
+```
+
+Warm-up: taking a look at my own name
+
+```{r}
+babynames %>%
+  filter(year==2002, name=="Mia")
+```
+
+Creating a function to graph the sex distribution of names over time
+
+```{r, warning = FALSE}
+gg_name <- function(idname = NULL, color1 = NULL, color2 = NULL) {
+  p <- ggplot(babynames %>% filter(name==idname),
+              aes(x=year, y=n, color=sex)) +
+    geom_line(color1="hotpink", color1="darkblue") +
+    ggtitle(idname) +
+    scale_color_manual(values=c(color1,color2))
+  return(p)
+}
+
+grid.arrange(
+  gg_name("Mia", color1 = "hotpink", color2 = "darkblue"),
+  gg_name("James", color1 = "hotpink", color2 = "darkblue"),
+  gg_name("Jolie", color1 = "hotpink", color2 = "darkblue"),
+  gg_name("Tyler", color1 = "hotpink", color2 = "darkblue"),
+  gg_name("Maddie", color1 = "hotpink", color2 = "darkblue")
+  )
+```
+
+Now for a little bit of data carpentry. 
+First, I narrowed down the criteria that I wanted to work with by using filter(). I chose to work with babynames from the year 2002 — my birth year. 
+After this, I am essentially creating a separate M and F column instead of having a sex column, where each name has an M and F row
+
+```{r, warning = FALSE, message=FALSE}
+df <- babynames %>% 
+  filter(year == 2002) %>%
+  group_by(name, sex) %>%
+  summarize(total = sum(n)) %>%
+  pivot_wider(
+  names_from = sex, values_from = total, values_fill = 0)
+```
+
+I am changing M and F to nM and nF so R does not confuse F with FALSE.
+Next, I am adding to the dataset by creating a total column that includes the number of births (both M and F) for every name and the sex ratio. To find more unisex names, I filtered the output to have ratios between 0.33 and 0.67
+
+```{r}
+colnames(df) <- c("name", "nM", "nF")
+df <- df %>% mutate(ratio = nM/nF, total = nM + nF)
+unisex_names <- df %>%
+  filter(ratio > .33, ratio < .67, total > 250)
+unisex_names
+```
+
+Plotting unisex names and separating bars based on sex:
+
+```{r}
+ggplot(unisex_names, aes(x=reorder(name, total), y=total)) +
+  geom_col() +
+  coord_flip() +
+  xlab("total") +
+  ylab("name") +
+  ggtitle("gender breakdown of unisex names")
+```
+
+Work on separating bars into nM and nF
+
+```{r}
+unisex_names %>%
+  pivot_longer(2:3, names_to = "sex") %>%
+  ggplot(aes(x=reorder(name, total), y=total, fill=sex)) +
+           geom_col() +
+  coord_flip() +
+  xlab("total") +
+  ylab("name") +
+  ggtitle("gender breakdown of unisex names")
+```
+
+
+
+
+
+
+
+

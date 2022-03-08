@@ -1,0 +1,136 @@
+---
+title: "Holt's Model on Apple Revenue"
+output: html_document
+---
+Presentation for 3.9.2022 Data Viz Club
+
+This document explores time series modeling practices in business contexts.
+
+Loading in tidyverse and fpp3 packages. fpp3 is the respective package for the 3rd edition of a textbook called Forecasting: Principles and Practice. It includes various models, such as seasonal decomposition, deterministic, simple exponential smoothing, Holt's, etc. nortest includes the ad.test which will compute Normality of residuals.
+```{r setup, include=FALSE}
+library(tidyverse)
+library(fpp3)
+library(nortest)
+```
+
+Loading in quarterly Apple revenue data from 2011 through 2021. The data includes 44 periods. The data was scraped from https://www.macrotrends.net/stocks/charts/AAPL/apple/revenue and I adjusted the format into a .csv that would be easier to work with.
+
+A tibble is the default tidyverse data output, while a tsibble is a time series tibble indexed on a particular temporal variable, in this case yearquarter.
+
+Plotting Revenue against Time. Note: Revenue is in millions.
+```{r, warning=F,message=F}
+df <- read_csv("Apple_Revenue.csv")
+
+df <- df %>%
+  add_column(qtr=yearquarter("2011 Q1") + 0:43, .before=TRUE) %>%
+  as_tsibble(index=qtr)
+
+df$Qtr <- as.factor(df$Qtr)
+
+ggplot(df, aes(x=qtr, y=Revenue)) +
+  geom_line() +
+  geom_point(aes(color = Qtr)) +
+  scale_color_manual(values = c("blue", "purple", "orange", "darkgreen"))
+```
+
+Adding a new column LogRevenue in an attempt to stablize the variance. This is evident in that the y-axis scale significantly decreased.
+```{r}
+df <- df %>% mutate(LogRevenue = log(Revenue))
+
+ggplot(df, aes(x=qtr, y=LogRevenue)) +
+  geom_line() +
+  geom_point(aes(color = Qtr)) +
+  scale_color_manual(values = c("blue", "purple", "orange", "darkgreen"))
+```
+
+Using the STL function with default season and trend windows to break down LogRevenue into its Trend, Seasonal, and Irregular components. I've added 2 more columns to the dataframe, df: Season and LogA. Season represents the Seasonal component and LogA represents seasonally adjusted LogRevenue. This is essentially LogRevenue minus Season.
+
+Plotting the Season column. The seasonality slightly changes over time. If the seasonality was constant, a seasonal decomposition model would have been sufficient, but this is not the case.
+```{r}
+df_stl <- df %>% model(STL(LogRevenue)) %>% components()
+df <- df %>% add_column(Season = df_stl$season_year,
+                          LogA = df_stl$season_adjust)
+
+ggplot(df, aes(x=qtr, y=Season)) +
+  geom_line() +
+  geom_point(aes(color = Qtr)) +
+  scale_color_manual(values = c("blue", "purple", "orange", "darkgreen"))
+```
+
+Plotting seasonally adjusted LogRevenue. The trend line is not completely smooth but this is ok because peaks and troughs do not occur in the same quarter of successive years, so this can be attributed to the Irregular component.
+```{r}
+ggplot(df, aes(x=qtr, y=LogA)) +
+  geom_line() +
+  geom_point(aes(color = Qtr)) +
+  scale_color_manual(values = c("blue", "purple", "orange", "darkgreen"))
+```
+
+ETS is where the exponential smoothing comes into practice and ETS stands for Error/Trend/Season. I am using the ETS command on LogA. 
+
+Checking assumptions of residuals is an important part of model validation. The acf graph does not show autocorrelation of residuals, which is particularly important for the first- and fourth-orders. The significance of the 11th autocorrelation coefficient can be attributed to the Irregular component.
+```{r}
+ETS <- df %>% model(ETS(LogA ~ error("A") + trend("A") + season("N")))  
+
+ETS %>% gg_tsresiduals()
+```
+
+Glance(), augment(), and components() are all functions that can be used on the ETS model output to estimate our parameters.
+
+At the end of this chunk, I add the levels, slopes, forecasts, and residuals, to the dataframe.
+```{r}
+## glance is useful for finding sigma and model selection 
+ETS_g <- glance(ETS) 
+ETS_g$sigma2 %>%
+  sqrt() # 0.083151
+
+## augment will give us our one-step ahead in-sample forecasts (fitted values)
+ETS_a <- augment(ETS)
+
+## components will give us the levels and slopes
+ETS_c <- components(ETS)
+
+
+df <- df %>% add_column(level = ETS_c$level[2:45],
+                        slope = ETS_c$slope[2:45],
+                     forecast = ETS_a$.fitted,
+                    residuals = ETS_a$.resid)
+```
+
+Checking for Normality of residuals. P > 0.05, so residuals are Normally distributed. This tells us that our prediction intervals will be reliable.
+```{r}
+ad.test(ETS_a$.resid)
+```
+
+Forecasting 3 periods into the future, including prediction intervals, using forecast() and hilo().
+```{r}
+ETS_f <- ETS %>% forecast(h=3)
+pred_int <- hilo(ETS_f)
+```
+
+Plotting in-sample observations and one-step ahead forecasts from ETS AAN model against Time
+```{r}
+ggplot(df, aes(x=qtr, y=LogA)) +
+  geom_line(aes(y=LogA)) +
+  geom_line(aes(y=forecast, color = "red")) +
+  theme(legend.position="none")
+```
+
+Computing a deterministic model to show that it is inflexible compared to Holt's.
+```{r}
+df <- df %>% mutate(TimeSq = Time^2, .after="Time")
+det <- df %>% model(TSLM(LogA ~ Time + TimeSq))
+det_t <- tidy(det)
+alpha <- det_t$estimate[1]
+beta1 <- det_t$estimate[2]
+beta2 <- det_t$estimate[3]
+det_model <- alpha + beta1*df$Time + beta2*df$TimeSq
+```
+
+Plotting in-sample observations, one-step ahead forecasts from ETS AAN model, and deterministic model against Time
+```{r}
+ggplot(df, aes(x=qtr, y=LogA)) +
+  geom_line(aes(x=qtr, y=LogA)) +
+  geom_line(aes(x=qtr, y=forecast), color = "red") +
+  geom_line(aes(x=qtr, y=det_model), color = "blue", lty=2) +
+  theme(legend.position="none")
+```

@@ -2,6 +2,8 @@
 title: "Holt's Model on Apple Revenue"
 output: html_document
 ---
+Note: A lot of conceptual information and syntax was learned in STA 372.5.
+
 Presentation for 3.9.2022 Data Viz Club
 
 This document explores time series modeling practices in business contexts.
